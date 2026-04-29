@@ -19,8 +19,7 @@ if [ ! -f "third_party/openfx/include/ofxImageEffect.h" ]; then
 fi
 
 cmake -B "${BUILD_DIR}" -S . \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DDASGRAIN_BUILD_TESTS=OFF
+      -DCMAKE_BUILD_TYPE=Release
 cmake --build "${BUILD_DIR}" -j "$(nproc)"
 
 echo "Installing to ${PLUGIN_DIR} (sudo)..."

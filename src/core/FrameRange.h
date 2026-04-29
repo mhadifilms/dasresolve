@@ -26,8 +26,8 @@ public:
                                      int firstFrame,
                                      int lastFrame);
 
-    // Parse just the additional-frames string. Returns the (deduplicated,
-    // unsorted) frames. Useful for unit tests.
+    // Parse just the additional-frames string. Returns the deduplicated,
+    // unsorted frames.
     static std::vector<int> parseAdditional(const std::string& s);
 };
 

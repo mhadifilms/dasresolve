@@ -28,5 +28,5 @@ Thumbs.db
 *.swo
 *~
 
-# Generated test media
-tests/e2e/fixtures/
+# Local test and development harnesses
+tests/

@@ -5,8 +5,8 @@
 // DasGrain gizmo. Same constants and ValueNoise3D() so the Mac CPU path
 // produces frame-identical results to the GPU path.
 //
-// Mostly used for unit tests and the CPU fallback; the GPU kernels embed an
-// equivalent translation in the host shading language.
+// Shared CPU reference helpers; the GPU kernels embed an equivalent
+// translation in the host shading language.
 
 #pragma once
 

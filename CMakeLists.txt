@@ -293,8 +293,7 @@ add_custom_command(TARGET ${DASGRAIN_TARGET} POST_BUILD
     COMMENT "Copying license and notice files into DasGrain.ofx bundle")
 
 # macOS XProtect / Gatekeeper will kill unsigned universal binaries on first
-# launch. Ad-hoc codesign every freshly built binary so the local dev loop
-# (test harness + plugin loaded by Resolve) doesn't get blocked.
+# launch. Ad-hoc codesign every freshly built binary so Resolve can load it.
 if(APPLE)
     add_custom_command(TARGET ${DASGRAIN_TARGET} POST_BUILD
         COMMAND /usr/bin/codesign --force --sign - "$<TARGET_FILE:${DASGRAIN_TARGET}>"
@@ -306,15 +305,6 @@ endif()
 install(DIRECTORY "${DASGRAIN_BUNDLE_DIR}/"
         DESTINATION "${PLUGIN_INSTALLDIR}/${DASGRAIN_BUNDLE_NAME}"
         USE_SOURCE_PERMISSIONS)
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-option(DASGRAIN_BUILD_TESTS "Build unit tests" ON)
-if(DASGRAIN_BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests/unit)
-endif()
 
 message(STATUS "DasGrain backends: "
     "Metal=${_DASGRAIN_METAL_AVAILABLE} "

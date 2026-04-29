@@ -1,0 +1,32 @@
+# Build output
+build/
+build-*/
+out/
+.cache/
+.cmake/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+compile_commands.json
+Makefile
+*.ofx
+*.ofx.bundle/
+
+# IDE
+.vscode/
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.swp
+*.swo
+*~
+
+# Generated test media
+tests/e2e/fixtures/

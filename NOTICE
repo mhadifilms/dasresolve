@@ -1,0 +1,50 @@
+DasGrain OFX
+Copyright 2026 The DasGrain OFX Authors
+
+This product includes or is informed by the following third-party work:
+
+  * "DasGrain" Nuke gizmo by Fabian Holtz
+    https://www.nukepedia.com/tools/gizmos/other/dasgrain/
+    https://gist.github.com/rafaelperez/118dd1f0b6d7d2238f4643240b698dfd
+    DasGrain OFX credits the original gizmo's concept, workflow, parameter
+    surface, and user-facing terminology to Fabian Holtz.
+
+  * Voronoi BlinkScript kernel by Ivan Busquets
+    http://www.nukepedia.com/blink/image/voronoi/
+    Used as the reference for the scatter workflow. The Voronoi/value-noise
+    algorithm is based on libNoise (https://libnoise.sourceforge.net/),
+    which is distributed under the LGPL 2.1.
+
+  * OpenFX SDK
+    https://github.com/AcademySoftwareFoundation/openfx
+    BSD-3-Clause License.
+
+OpenFX SDK BSD-3-Clause notice:
+
+Copyright OpenFX and contributors to the OpenFX project.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.

@@ -31,6 +31,15 @@ using namespace metal;
 
 struct GrainParams {
     float    luminance;
+    float    grainAmount;
+    float    shadowGrain;
+    float    midtoneGrain;
+    float    highlightGrain;
+    float    curveContrast;
+    float    curvePivot;
+    float    redGrain;
+    float    greenGrain;
+    float    blueGrain;
     int      fixGhosting;
     int      externalGrain;
     int      outputMode;
@@ -74,6 +83,20 @@ inline float sampleCurve(device const float* curve,
 
 inline float luma709(float r, float g, float b) {
     return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+}
+
+// GPU copy of the CPU tone-region shaping. Keep behavior matched with
+// GrainApplyCPU.cpp so Resolve can switch backends without changing output.
+inline float toneGain(constant GrainParams& gp, float3 C) {
+    float pivot = clamp(gp.curvePivot, 0.001f, 0.999f);
+    float y = clamp(luma709(C.x, C.y, C.z), 0.0f, 1.0f);
+    float shadow = clamp((pivot - y) / pivot, 0.0f, 1.0f);
+    float highlight = clamp((y - pivot) / (1.0f - pivot), 0.0f, 1.0f);
+    float midtone = max(0.0f, 1.0f - max(shadow, highlight));
+    float shaped = gp.shadowGrain * shadow
+                 + gp.midtoneGrain * midtone
+                 + gp.highlightGrain * highlight;
+    return max(0.0f, 1.0f + (shaped - 1.0f) * max(gp.curveContrast, 0.0f));
 }
 
 kernel void grainApply(device const float*       comp       [[buffer(0)]],
@@ -141,10 +164,17 @@ kernel void grainApply(device const float*       comp       [[buffer(0)]],
         sampleCurve(curve, gp.curveSize, 1, gp.minX, gp.maxX, C[1]),
         sampleCurve(curve, gp.curveSize, 2, gp.minX, gp.maxX, C[2]),
     };
+    float tone = toneGain(gp, float3(C[0], C[1], C[2]));
+    float liveGain = max(gp.grainAmount, 0.0f);
+    float channelGain[3] = {
+        max(gp.redGrain, 0.0f),
+        max(gp.greenGrain, 0.0f),
+        max(gp.blueGrain, 0.0f),
+    };
     float gA[3] = {
-        gS[0] * cC[0] / kEps,
-        gS[1] * cC[1] / kEps,
-        gS[2] * cC[2] / kEps,
+        gS[0] * cC[0] / kEps * tone * channelGain[0] * liveGain,
+        gS[1] * cC[1] / kEps * tone * channelGain[1] * liveGain,
+        gS[2] * cC[2] / kEps * tone * channelGain[2] * liveGain,
     };
 
     float m = 1.0f;
@@ -154,7 +184,11 @@ kernel void grainApply(device const float*       comp       [[buffer(0)]],
         if (gp.invertMask) m = 1.0f - m;
     }
 
-    float r[3] = {C[0] + gA[0] * m, C[1] + gA[1] * m, C[2] + gA[2] * m};
+    float r[3] = {
+        C[0] + gA[0] * m,
+        C[1] + gA[1] * m,
+        C[2] + gA[2] * m,
+    };
     float o[3];
     int mode = gp.outputMode;
     if (mode == 1)      { o[0]=gO[0]; o[1]=gO[1]; o[2]=gO[2]; }
@@ -208,6 +242,15 @@ CachedPipeline& getPipeline(id<MTLDevice> device) {
 #pragma pack(push, 4)
 struct GrainParamsGPU {
     float luminance;
+    float grainAmount;
+    float shadowGrain;
+    float midtoneGrain;
+    float highlightGrain;
+    float curveContrast;
+    float curvePivot;
+    float redGrain;
+    float greenGrain;
+    float blueGrain;
     int fixGhosting;
     int externalGrain;
     int outputMode;
@@ -282,6 +325,15 @@ void runGrainApplyMetal(void* metalCmdQueue,
 
     GrainParamsGPU gp{};
     gp.luminance     = p.luminance;
+    gp.grainAmount   = p.grainAmount;
+    gp.shadowGrain   = p.shadowGrain;
+    gp.midtoneGrain  = p.midtoneGrain;
+    gp.highlightGrain = p.highlightGrain;
+    gp.curveContrast = p.curveContrast;
+    gp.curvePivot    = p.curvePivot;
+    gp.redGrain      = p.redGrain;
+    gp.greenGrain    = p.greenGrain;
+    gp.blueGrain     = p.blueGrain;
     gp.fixGhosting   = p.fixGhosting;
     gp.externalGrain = p.externalGrain;
     gp.outputMode    = p.outputMode;

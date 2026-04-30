@@ -303,6 +303,61 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
                false, pageAnalyse, groupAnalyse);
 
     // ---- Adjust tab -------------------------------------------------------
+    defineDouble(desc, params::kGrainAmount, "grain amount",
+                 "Live gain for the grain added back onto Source. "
+                 "0 = Source only, 1 = normal DasGrain, higher values "
+                 "exaggerate the regrain.",
+                 0.0, 4.0, defaults::kGrainAmount, pageAdjust);
+
+    // Resolve does not implement OFX parametric curves, so the original
+    // Nuke curve is represented as practical live knobs: three tonal gains,
+    // a pivot, and a contrast control that controls how strongly the gains
+    // bend the analysed response.
+    auto* groupResponse = desc.defineGroupParam("group_response_shape");
+    groupResponse->setLabels("Response Shape", "Response Shape", "Response Shape");
+    groupResponse->setHint("Resolve-friendly controls for shaping the analysed "
+                           "grain response without editing raw curve JSON.");
+    pageAdjust->addChild(*groupResponse);
+
+    // Each tone control is a multiplier for adapted grain in that Source
+    // luminance region. Defaults are neutral so existing analysed curves
+    // render identically until the artist adjusts them.
+    defineDouble(desc, params::kShadowGrain, "shadow grain",
+                 "Scale adapted grain in dark Source values.",
+                 0.0, 4.0, defaults::kToneGrain, pageAdjust, groupResponse);
+    defineDouble(desc, params::kMidtoneGrain, "midtone grain",
+                 "Scale adapted grain around the curve pivot.",
+                 0.0, 4.0, defaults::kToneGrain, pageAdjust, groupResponse);
+    defineDouble(desc, params::kHighlightGrain, "highlight grain",
+                 "Scale adapted grain in bright Source values.",
+                 0.0, 4.0, defaults::kToneGrain, pageAdjust, groupResponse);
+    defineDouble(desc, params::kCurveContrast, "curve contrast",
+                 "Strength of the shadow/midtone/highlight shaping. "
+                 "0 ignores the tone controls; 1 is normal.",
+                 0.0, 4.0, defaults::kCurveContrast, pageAdjust, groupResponse);
+    defineDouble(desc, params::kCurvePivot, "curve pivot",
+                 "Luminance value treated as midtone for the tone-grain "
+                 "controls.",
+                 0.0, 1.0, defaults::kCurvePivot, pageAdjust, groupResponse);
+
+    auto* groupChannel = desc.defineGroupParam("group_channel_trim");
+    groupChannel->setLabels("Channel Trim", "Channel Trim", "Channel Trim");
+    groupChannel->setHint("Small per-channel grain trims for matching colored "
+                          "stock or biased denoise results.");
+    pageAdjust->addChild(*groupChannel);
+
+    // Small RGB trims are useful when denoise leaves a channel bias or the
+    // plate's grain is visibly warmer/cooler than the comp.
+    defineDouble(desc, params::kRedGrain, "red grain",
+                 "Scale adapted grain in the red channel.",
+                 0.0, 4.0, defaults::kChannelGrain, pageAdjust, groupChannel);
+    defineDouble(desc, params::kGreenGrain, "green grain",
+                 "Scale adapted grain in the green channel.",
+                 0.0, 4.0, defaults::kChannelGrain, pageAdjust, groupChannel);
+    defineDouble(desc, params::kBlueGrain, "blue grain",
+                 "Scale adapted grain in the blue channel.",
+                 0.0, 4.0, defaults::kChannelGrain, pageAdjust, groupChannel);
+
     {
         auto* p = desc.definePushButtonParam(params::kCurveHelp);
         p->setLabels("What am I looking at?",
@@ -313,13 +368,9 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
     }
     // NOTE: the original gizmo had an interactive parametric curve widget
     // here. OFX's `kOfxParamTypeParametric` is a host-optional feature that
-    // DaVinci Resolve does NOT implement — calling defineParametricParam
-    // makes Resolve's host fail OfxActionCreateInstance with
-    // kOfxStatErrUnknown, which is exactly what showed up in
-    // davinci_resolve.log when we tried to drop the plugin. So in this
-    // port the curve is JSON-only: the Analyse pass writes the canonical
-    // form into `response_curve_json`, and the user edits it via the
-    // Curve JSON paste / Import / Export controls below.
+    // DaVinci Resolve does NOT implement, so normal users get the live
+    // response-shape controls above. JSON remains only as an advanced import /
+    // export path for debugging and preserving analysed curves.
 
     {
         auto* p = defineString(desc, params::kResponseCurveJSON,
@@ -331,11 +382,21 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
         p->setEnabled(false);
     }
 
-    // Curve JSON import/export. The user pastes the JSON for a previously
-    // analysed curve here and clicks Import; Export echoes the current
-    // curve back into this field plus a message dialog. The OFX
-    // `eStringTypeMultiLine` mode is host-optional and Resolve doesn't
-    // honour it (the curve JSON fits on one line in practice anyway).
+    auto* groupAdvancedCurve = desc.defineGroupParam("group_advanced_curve");
+    groupAdvancedCurve->setLabels("Advanced Curve I/O",
+                                  "Advanced Curve I/O",
+                                  "Advanced Curve I/O");
+    groupAdvancedCurve->setHint("Raw curve JSON tools for debugging or moving "
+                                "analysed curves between shots.");
+    pageAdjust->addChild(*groupAdvancedCurve);
+
+    defineBool(desc, params::kShowCurveIO, "show curve JSON tools",
+               "Enable the raw curve JSON import/export controls. Leave this "
+               "off for normal grading/compositing work.",
+               false, pageAdjust, groupAdvancedCurve);
+
+    // Curve JSON import/export. This is deliberately gated behind
+    // show_curve_io; Resolve lacks the interactive curve widget Nuke exposes.
     {
         auto* p = desc.defineStringParam(params::kCurveJSONImport);
         p->setLabels("Curve JSON",
@@ -347,12 +408,16 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
         p->setStringType(eStringTypeSingleLine);
         p->setAnimates(false);
         p->setEvaluateOnChange(false);
+        p->setEnabled(false);
+        p->setParent(*groupAdvancedCurve);
         pageAdjust->addChild(*p);
     }
     {
         auto* p = desc.definePushButtonParam(params::kCurveImport);
         p->setLabels("Import curve", "Import curve", "Import curve");
         p->setHint("Apply the JSON in the field above to the response curve.");
+        p->setEnabled(false);
+        p->setParent(*groupAdvancedCurve);
         pageAdjust->addChild(*p);
     }
     {
@@ -360,6 +425,8 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
         p->setLabels("Export curve", "Export curve", "Export curve");
         p->setHint("Write the current response curve into the JSON field "
                    "above (and into the diagnostic message dialog).");
+        p->setEnabled(false);
+        p->setParent(*groupAdvancedCurve);
         pageAdjust->addChild(*p);
     }
 

@@ -17,7 +17,9 @@
 //
 //   g_norm    = g_lc * eps / max(cClean, eps)
 //   g_source  = externalGrain ? ExternalGrain : g_norm
-//   g_adapted = g_source * cComp / eps
+//   toneGain  = shadow/midtone/highlight shaping at comp luminance
+//   rgbGain   = per-channel user trims
+//   g_adapted = g_source * cComp / eps * toneGain * rgbGain * grainAmount
 //   m         = mask alpha (or 1)  [optionally inverted]
 //   regrain   = comp + g_adapted * m
 //
@@ -54,6 +56,21 @@ inline float sampleCurve(const CurveLUT& lut, int channel, float x) {
     const float fr   = fpos - float(i0);
     const float* ch  = lut.data + channel * lut.size;
     return ch[i0] * (1.0f - fr) + ch[i1] * fr;
+}
+
+// Resolve cannot expose Nuke's original editable curve widget, so the UI
+// presents live tone-region controls. This helper turns Source luma into
+// shadow/midtone/highlight weights around curvePivot, then blends the three
+// gains and applies curveContrast as the shaping strength.
+inline float toneGain(const GrainApplyParams& p, const float C[3]) {
+    const float pivot = std::clamp(p.curvePivot, 0.001f, 0.999f);
+    const float y = std::clamp(float(colorspace::luma709(C[0], C[1], C[2])), 0.0f, 1.0f);
+    const float shadow = std::clamp((pivot - y) / pivot, 0.0f, 1.0f);
+    const float highlight = std::clamp((y - pivot) / (1.0f - pivot), 0.0f, 1.0f);
+    const float midtone = std::max(0.0f, 1.0f - std::max(shadow, highlight));
+    const float shaped =
+        p.shadowGrain * shadow + p.midtoneGrain * midtone + p.highlightGrain * highlight;
+    return std::max(0.0f, 1.0f + (shaped - 1.0f) * std::max(p.curveContrast, 0.0f));
 }
 
 inline const float* readPixel(const ImageViewConst& v, int x, int y) {
@@ -152,10 +169,17 @@ void runGrainApplyCPU(const GrainApplyParams& p,
                 sampleCurve(p.curve, 1, C[1]),
                 sampleCurve(p.curve, 2, C[2]),
             };
+            const float tone = toneGain(p, C);
+            const float channelGain[3] = {
+                std::max(p.redGrain, 0.0f),
+                std::max(p.greenGrain, 0.0f),
+                std::max(p.blueGrain, 0.0f),
+            };
+            const float liveGain = std::max(p.grainAmount, 0.0f);
             const float g_adapted[3] = {
-                g_source[0] * cC[0] * invEps,
-                g_source[1] * cC[1] * invEps,
-                g_source[2] * cC[2] * invEps,
+                g_source[0] * cC[0] * invEps * tone * channelGain[0] * liveGain,
+                g_source[1] * cC[1] * invEps * tone * channelGain[1] * liveGain,
+                g_source[2] * cC[2] * invEps * tone * channelGain[2] * liveGain,
             };
 
             // 6. Mask. When connected we use the alpha channel of `mask`;

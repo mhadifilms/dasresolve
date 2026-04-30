@@ -38,8 +38,21 @@ __device__ inline float luma709(float r, float g, float b) {
     return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 }
 
+struct GrainParamsGPU;
+
+__device__ inline float toneGain(const GrainParamsGPU& gp, const float C[3]);
+
 struct GrainParamsGPU {
     float luminance;
+    float grainAmount;
+    float shadowGrain;
+    float midtoneGrain;
+    float highlightGrain;
+    float curveContrast;
+    float curvePivot;
+    float redGrain;
+    float greenGrain;
+    float blueGrain;
     int   fixGhosting;
     int   externalGrain;
     int   outputMode;
@@ -62,6 +75,20 @@ struct GrainParamsGPU {
     int   hasMaskBuf;
     int   hasExt;
 };
+
+// GPU copy of the CPU tone-region shaping. Keep behavior matched with
+// GrainApplyCPU.cpp so Resolve can switch backends without changing output.
+__device__ inline float toneGain(const GrainParamsGPU& gp, const float C[3]) {
+    float pivot = fmaxf(0.001f, fminf(gp.curvePivot, 0.999f));
+    float y = fmaxf(0.0f, fminf(luma709(C[0], C[1], C[2]), 1.0f));
+    float shadow = fmaxf(0.0f, fminf((pivot - y) / pivot, 1.0f));
+    float highlight = fmaxf(0.0f, fminf((y - pivot) / (1.0f - pivot), 1.0f));
+    float midtone = fmaxf(0.0f, 1.0f - fmaxf(shadow, highlight));
+    float shaped = gp.shadowGrain * shadow
+                 + gp.midtoneGrain * midtone
+                 + gp.highlightGrain * highlight;
+    return fmaxf(0.0f, 1.0f + (shaped - 1.0f) * fmaxf(gp.curveContrast, 0.0f));
+}
 
 __global__ void grainApplyKernel(const float* __restrict__ comp,
                                  const float* __restrict__ plate,
@@ -116,10 +143,17 @@ __global__ void grainApplyKernel(const float* __restrict__ comp,
     float cC0 = sampleCurve(curve, gp.curveSize, 0, gp.minX, gp.maxX, C[0]);
     float cC1 = sampleCurve(curve, gp.curveSize, 1, gp.minX, gp.maxX, C[1]);
     float cC2 = sampleCurve(curve, gp.curveSize, 2, gp.minX, gp.maxX, C[2]);
+    float tone = toneGain(gp, C);
+    float liveGain = fmaxf(gp.grainAmount, 0.0f);
+    float channelGain[3] = {
+        fmaxf(gp.redGrain, 0.0f),
+        fmaxf(gp.greenGrain, 0.0f),
+        fmaxf(gp.blueGrain, 0.0f),
+    };
     float gA[3] = {
-        gS[0] * cC0 / kEps,
-        gS[1] * cC1 / kEps,
-        gS[2] * cC2 / kEps,
+        gS[0] * cC0 / kEps * tone * channelGain[0] * liveGain,
+        gS[1] * cC1 / kEps * tone * channelGain[1] * liveGain,
+        gS[2] * cC2 / kEps * tone * channelGain[2] * liveGain,
     };
 
     float m = 1.0f;
@@ -129,7 +163,11 @@ __global__ void grainApplyKernel(const float* __restrict__ comp,
         if (gp.invertMask) m = 1.0f - m;
     }
 
-    float r[3] = {C[0]+gA[0]*m, C[1]+gA[1]*m, C[2]+gA[2]*m};
+    float r[3] = {
+        C[0]+gA[0]*m,
+        C[1]+gA[1]*m,
+        C[2]+gA[2]*m,
+    };
     float o[3];
     if      (gp.outputMode == 1) { o[0]=gO[0]; o[1]=gO[1]; o[2]=gO[2]; }
     else if (gp.outputMode == 2) { o[0]=gN[0]; o[1]=gN[1]; o[2]=gN[2]; }
@@ -168,6 +206,15 @@ void runGrainApplyCuda(void* cudaStream,
     auto sf = [](int strideBytes) { return strideBytes / int(sizeof(float)); };
     GrainParamsGPU gp{};
     gp.luminance     = p.luminance;
+    gp.grainAmount   = p.grainAmount;
+    gp.shadowGrain   = p.shadowGrain;
+    gp.midtoneGrain  = p.midtoneGrain;
+    gp.highlightGrain = p.highlightGrain;
+    gp.curveContrast = p.curveContrast;
+    gp.curvePivot    = p.curvePivot;
+    gp.redGrain      = p.redGrain;
+    gp.greenGrain    = p.greenGrain;
+    gp.blueGrain     = p.blueGrain;
     gp.fixGhosting   = p.fixGhosting;
     gp.externalGrain = p.externalGrain;
     gp.outputMode    = p.outputMode;

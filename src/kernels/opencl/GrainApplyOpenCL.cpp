@@ -49,6 +49,27 @@ inline float luma709(float r, float g, float b) {
     return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 }
 
+// GPU copy of the CPU tone-region shaping. Keep behavior matched with
+// GrainApplyCPU.cpp so Resolve can switch backends without changing output.
+inline float toneGain(float shadowGrain,
+                      float midtoneGrain,
+                      float highlightGrain,
+                      float curveContrast,
+                      float curvePivot,
+                      float C0,
+                      float C1,
+                      float C2) {
+    float pivot = clamp(curvePivot, 0.001f, 0.999f);
+    float y = clamp(luma709(C0, C1, C2), 0.0f, 1.0f);
+    float shadow = clamp((pivot - y) / pivot, 0.0f, 1.0f);
+    float highlight = clamp((y - pivot) / (1.0f - pivot), 0.0f, 1.0f);
+    float midtone = fmax(0.0f, 1.0f - fmax(shadow, highlight));
+    float shaped = shadowGrain * shadow
+                 + midtoneGrain * midtone
+                 + highlightGrain * highlight;
+    return fmax(0.0f, 1.0f + (shaped - 1.0f) * fmax(curveContrast, 0.0f));
+}
+
 __kernel void grainApply(__global const float* comp,
                          __global const float* plate,
                          __global const float* degr,
@@ -57,6 +78,15 @@ __kernel void grainApply(__global const float* comp,
                          __global       float* dst,
                          __global const float* curve,
                          float luminance,
+                         float grainAmount,
+                         float shadowGrain,
+                         float midtoneGrain,
+                         float highlightGrain,
+                         float curveContrast,
+                         float curvePivot,
+                         float redGrain,
+                         float greenGrain,
+                         float blueGrain,
                          int   fixGhosting,
                          int   externalGrain,
                          int   outputMode,
@@ -121,10 +151,18 @@ __kernel void grainApply(__global const float* comp,
         sampleCurve(curve, curveSize, 1, minX, maxX, C[1]),
         sampleCurve(curve, curveSize, 2, minX, maxX, C[2]),
     };
+    float tone = toneGain(shadowGrain, midtoneGrain, highlightGrain,
+                          curveContrast, curvePivot, C[0], C[1], C[2]);
+    float liveGain = fmax(grainAmount, 0.0f);
+    float channelGain[3] = {
+        fmax(redGrain, 0.0f),
+        fmax(greenGrain, 0.0f),
+        fmax(blueGrain, 0.0f),
+    };
     float gA[3] = {
-        gS[0] * cC[0] / EPS,
-        gS[1] * cC[1] / EPS,
-        gS[2] * cC[2] / EPS,
+        gS[0] * cC[0] / EPS * tone * channelGain[0] * liveGain,
+        gS[1] * cC[1] / EPS * tone * channelGain[1] * liveGain,
+        gS[2] * cC[2] / EPS * tone * channelGain[2] * liveGain,
     };
 
     float m = 1.0f;
@@ -134,7 +172,11 @@ __kernel void grainApply(__global const float* comp,
         if (invertMask) m = 1.0f - m;
     }
 
-    float r[3] = {C[0]+gA[0]*m, C[1]+gA[1]*m, C[2]+gA[2]*m};
+    float r[3] = {
+        C[0]+gA[0]*m,
+        C[1]+gA[1]*m,
+        C[2]+gA[2]*m,
+    };
     float o[3];
     if      (outputMode == 1) { o[0]=gO[0]; o[1]=gO[1]; o[2]=gO[2]; }
     else if (outputMode == 2) { o[0]=gN[0]; o[1]=gN[1]; o[2]=gN[2]; }
@@ -241,6 +283,15 @@ void runGrainApplyOpenCL(void* clCmdQueue,
     err |= clSetKernelArg(k.kernel, idx++, sizeof(cl_mem), &dst.data);
     err |= clSetKernelArg(k.kernel, idx++, sizeof(cl_mem), &curveBuf);
     err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.luminance);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.grainAmount);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.shadowGrain);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.midtoneGrain);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.highlightGrain);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.curveContrast);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.curvePivot);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.redGrain);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.greenGrain);
+    err |= clSetKernelArg(k.kernel, idx++, sizeof(float), &p.blueGrain);
     err |= clSetKernelArg(k.kernel, idx++, sizeof(int),   &p.fixGhosting);
     err |= clSetKernelArg(k.kernel, idx++, sizeof(int),   &p.externalGrain);
     err |= clSetKernelArg(k.kernel, idx++, sizeof(int),   &p.outputMode);

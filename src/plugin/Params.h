@@ -53,6 +53,16 @@ constexpr const char* kAnalyseMaskInvert = "analyse_mask_invert";
 // Adjust tab.
 constexpr const char* kResponseCurve     = "response_curve";    // legacy id (unused; see kResponseCurveJSON)
 constexpr const char* kResponseCurveJSON = "response_curve_json"; // hidden String
+constexpr const char* kGrainAmount       = "grain_amount";      // live regrain gain
+constexpr const char* kShadowGrain       = "shadow_grain";      // dark-tone grain gain
+constexpr const char* kMidtoneGrain      = "midtone_grain";     // pivot-tone grain gain
+constexpr const char* kHighlightGrain    = "highlight_grain";   // bright-tone grain gain
+constexpr const char* kCurveContrast     = "curve_contrast";    // tone-shape strength
+constexpr const char* kCurvePivot        = "curve_pivot";       // luma centre for midtones
+constexpr const char* kRedGrain          = "red_grain";         // red-channel grain trim
+constexpr const char* kGreenGrain        = "green_grain";       // green-channel grain trim
+constexpr const char* kBlueGrain         = "blue_grain";        // blue-channel grain trim
+constexpr const char* kShowCurveIO       = "show_curve_io";     // advanced JSON UI gate
 
 // Replace tab.
 constexpr const char* kExternalGrain     = "external_grain";    // bool
@@ -75,10 +85,9 @@ constexpr const char* kTroubleshoot   = "troubleshoot";  // PushButton
 // `whatsthis` knob; opens a message dialog explaining the response curve.
 constexpr const char* kCurveHelp      = "curve_help";    // PushButton
 
-// Adjust tab — extra: response curve import/export. The user pastes JSON
-// into `kCurveJSONImport` and clicks `kCurveImport` to apply; clicking
-// `kCurveExport` writes the current curve into the (read-only) hidden
-// `kResponseCurveJSON` and shows it via a message dialog.
+// Adjust tab — advanced response curve import/export. Normal users shape the
+// curve through tone and RGB gain controls; these raw JSON controls are gated
+// by `kShowCurveIO` for debugging and transferring analysed curves.
 constexpr const char* kCurveJSONImport = "response_curve_json_paste";
 constexpr const char* kCurveImport     = "response_curve_import";   // PushButton
 constexpr const char* kCurveExport     = "response_curve_export";   // PushButton
@@ -104,6 +113,11 @@ constexpr int    kSampleCount      = 20;
 constexpr int    kNumberOfFrames   = 10;
 constexpr int    kCurvePoints      = 32;     // points along response curve
 constexpr double kLuminance        = 1.0;
+constexpr double kGrainAmount      = 1.0;
+constexpr double kToneGrain        = 1.0;
+constexpr double kCurveContrast    = 1.0;
+constexpr double kCurvePivot       = 0.5;
+constexpr double kChannelGrain     = 1.0;
 constexpr double kCellSize         = 40.0;
 constexpr int    kEdgeBlendSize    = 0;
 constexpr double kAmplitude        = 0.0;

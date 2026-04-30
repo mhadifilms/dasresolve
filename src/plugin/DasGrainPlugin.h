@@ -20,31 +20,54 @@ public:
     explicit DasGrainPlugin(OfxImageEffectHandle handle);
 
     // OFX overrides ----------------------------------------------------------
+    // Entry point for every rendered tile/frame. Dispatches analyse requests
+    // first, then routes the current frame to the grain-apply backend.
     void render(const OFX::RenderArguments& args) override;
+
+    // DasGrain is only identity when the host asks before clips are connected;
+    // otherwise render() decides whether to pass through or apply grain.
     bool isIdentity(const OFX::IsIdentityArguments& args,
                     OFX::Clip*& identityClip,
                     double& identityTime) override;
+
+    // Handles button clicks and UI toggles: Analyse state, help dialogs,
+    // Troubleshoot diagnostics, JSON import/export, and dependent UI enabling.
     void changedParam(const OFX::InstanceChangedArgs& args,
                       const std::string& name) override;
+
+    // Clip connection changes can affect which controls are meaningful.
     void changedClip(const OFX::InstanceChangedArgs& args,
                      const std::string& name) override;
+
+    // Tells the host which extra frames are needed for analyse and scatter
+    // so Resolve/Fusion can prefetch Plate and Degrained correctly.
     void getFramesNeeded(const OFX::FramesNeededArguments& args,
                          OFX::FramesNeededSetter& frames) override;
+
+    // Keeps Resolve/Fusion on float RGBA, matching the kernel assumptions.
     void getClipPreferences(OFX::ClipPreferencesSetter& prefs) override;
 
 private:
     // Helpers ---------------------------------------------------------------
+    // Copy Source to dst when required inputs are missing. This keeps a node
+    // dropped on a clip from rendering black before Plate/Degrained are wired.
     void renderPassThrough(const OFX::RenderArguments& args);
+
+    // Fetches OFX images/params for one render window, handles optional scatter
+    // and QC modes, and dispatches CPU/Metal/CUDA/OpenCL grain application.
     void renderGrainApply(const OFX::RenderArguments& args);
+
+    // Enables controls that depend on feature toggles, e.g. scatter-only
+    // settings and advanced curve JSON tools.
     void updateUiEnabled();
 
-    // Bake the parametric response curve into a flat LUT for the kernel.
+    // Bake the persisted response-curve JSON into a flat RGB LUT for kernels.
     // Returns a vector owning the data; CurveLUT.data points into it.
     std::vector<float> bakeResponseCurve(double time, int sampleCount) const;
 
     // Run the multi-frame analysis pass. Called from render() when
-    // analyse_state is "requested". Updates the parametric param + JSON
-    // string param via paramEditBegin/End and resets the state.
+    // analyse_state is "requested". Updates the hidden JSON curve store via
+    // beginEditBlock/endEditBlock and resets the state.
     void runAnalysePass(const OFX::RenderArguments& args);
 
     // Clips ----------------------------------------------------------------
@@ -70,6 +93,16 @@ private:
     // kOfxParamTypeParametric is host-optional and DaVinci Resolve does
     // not implement it. The canonical curve lives in `responseCurveJSON_`.
     OFX::StringParam*     responseCurveJSON_ = nullptr;
+    OFX::DoubleParam*     grainAmount_       = nullptr;
+    OFX::DoubleParam*     shadowGrain_       = nullptr;
+    OFX::DoubleParam*     midtoneGrain_      = nullptr;
+    OFX::DoubleParam*     highlightGrain_    = nullptr;
+    OFX::DoubleParam*     curveContrast_     = nullptr;
+    OFX::DoubleParam*     curvePivot_        = nullptr;
+    OFX::DoubleParam*     redGrain_          = nullptr;
+    OFX::DoubleParam*     greenGrain_        = nullptr;
+    OFX::DoubleParam*     blueGrain_         = nullptr;
+    OFX::BooleanParam*    showCurveIO_       = nullptr;
     OFX::BooleanParam*    externalGrainEnabled_ = nullptr;
     OFX::BooleanParam*    scatter_          = nullptr;
     OFX::Double2DParam*   boxLow_           = nullptr;

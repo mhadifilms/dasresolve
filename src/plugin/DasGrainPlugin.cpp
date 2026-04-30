@@ -42,6 +42,16 @@ DasGrainPlugin::DasGrainPlugin(OfxImageEffectHandle handle)
     // the on-screen curve widget any more — see DasGrainFactory.cpp and
     // DasGrainPlugin.h. The JSON string is the canonical store.
     responseCurveJSON_ = fetchStringParam(params::kResponseCurveJSON);
+    grainAmount_       = fetchDoubleParam(params::kGrainAmount);
+    shadowGrain_       = fetchDoubleParam(params::kShadowGrain);
+    midtoneGrain_      = fetchDoubleParam(params::kMidtoneGrain);
+    highlightGrain_    = fetchDoubleParam(params::kHighlightGrain);
+    curveContrast_     = fetchDoubleParam(params::kCurveContrast);
+    curvePivot_        = fetchDoubleParam(params::kCurvePivot);
+    redGrain_          = fetchDoubleParam(params::kRedGrain);
+    greenGrain_        = fetchDoubleParam(params::kGreenGrain);
+    blueGrain_         = fetchDoubleParam(params::kBlueGrain);
+    showCurveIO_       = fetchBooleanParam(params::kShowCurveIO);
 
     externalGrainEnabled_ = fetchBooleanParam(params::kExternalGrain);
     scatter_              = fetchBooleanParam(params::kScatter);
@@ -150,10 +160,21 @@ void DasGrainPlugin::renderGrainApply(const OFX::RenderArguments& args) {
     auto extView       = makeConstView(extImg);
 
     // ---- Build params -----------------------------------------------------
+    // These values are sampled at render time, so artists get immediate
+    // feedback when adjusting grain amount, tone-region shaping, or RGB trims.
     kernels::GrainApplyParams gp;
-    gp.luminance     = static_cast<float>(luminance_->getValueAtTime(args.time));
-    gp.fixGhosting   = fixGhosting_->getValueAtTime(args.time) ? 1 : 0;
-    gp.externalGrain = externalGrainEnabled_->getValueAtTime(args.time) ? 1 : 0;
+    gp.luminance      = static_cast<float>(luminance_->getValueAtTime(args.time));
+    gp.grainAmount    = static_cast<float>(grainAmount_->getValueAtTime(args.time));
+    gp.shadowGrain    = static_cast<float>(shadowGrain_->getValueAtTime(args.time));
+    gp.midtoneGrain   = static_cast<float>(midtoneGrain_->getValueAtTime(args.time));
+    gp.highlightGrain = static_cast<float>(highlightGrain_->getValueAtTime(args.time));
+    gp.curveContrast  = static_cast<float>(curveContrast_->getValueAtTime(args.time));
+    gp.curvePivot     = static_cast<float>(curvePivot_->getValueAtTime(args.time));
+    gp.redGrain       = static_cast<float>(redGrain_->getValueAtTime(args.time));
+    gp.greenGrain     = static_cast<float>(greenGrain_->getValueAtTime(args.time));
+    gp.blueGrain      = static_cast<float>(blueGrain_->getValueAtTime(args.time));
+    gp.fixGhosting    = fixGhosting_->getValueAtTime(args.time) ? 1 : 0;
+    gp.externalGrain  = externalGrainEnabled_->getValueAtTime(args.time) ? 1 : 0;
     int outputModeIdx = 0;
     output_->getValueAtTime(args.time, outputModeIdx);
     // Grain QC mode (= |regrain - blur1(regrain)| * 50) needs a 3x3
@@ -367,6 +388,8 @@ std::vector<float> DasGrainPlugin::bakeResponseCurve(double /*time*/,
     std::vector<float> out(static_cast<size_t>(sampleCount * 3), 0.0f);
     if (!responseCurveJSON_) return out;
 
+    // The hidden JSON string is the canonical store because Resolve cannot
+    // host OFX parametric-curve params. Kernels consume a compact flat LUT.
     std::string json;
     responseCurveJSON_->getValue(json);
     ResponseCurve curve;
@@ -560,14 +583,16 @@ void DasGrainPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
     }
     if (name == params::kCurveHelp) {
         sendMessage(OFX::Message::eMessageMessage, "dasgrain_curve_help",
-                    "The RGB curves are the sampled grain response. Their "
-                    "quality depends entirely on the quality of the degrain. "
-                    "If the curves look wrong, improve the degrain first. If "
-                    "they still look wrong, you can edit them here.\n\n"
-                    "You can also extend a curve to cover comp values that "
-                    "don't exist in the plate. Don't touch the master.\n\n"
-                    "Note: each curve's slope must always be positive "
-                    "(always going up).");
+                    "DasGrain analyses Plate - Degrained, normalises that "
+                    "grain by Plate luminance, then adapts it to Source "
+                    "luminance. In Resolve, use grain amount plus shadow / "
+                    "midtone / highlight grain for the normal artist-facing "
+                    "curve work.\n\n"
+                    "Curve pivot chooses where midtones sit. Curve contrast "
+                    "controls how strongly those tone knobs bend the response. "
+                    "RGB grain trims are for small color-channel bias fixes.\n\n"
+                    "Raw curve JSON is only for advanced import/export or "
+                    "debugging; enable 'show curve JSON tools' if you need it.");
         return;
     }
     if (name == params::kTroubleshoot) {
@@ -737,7 +762,8 @@ void DasGrainPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
                     "First 80 chars: " + json.substr(0, 80) + "...");
         return;
     }
-    if (name == params::kScatter || name == params::kExternalGrain) {
+    if (name == params::kScatter || name == params::kExternalGrain
+        || name == params::kShowCurveIO) {
         updateUiEnabled();
         return;
     }
@@ -824,6 +850,11 @@ void DasGrainPlugin::updateUiEnabled() {
     if (amplitude_)      amplitude_->setEnabled(scat);
     if (frequency_)      frequency_->setEnabled(scat);
     if (seed_)           seed_->setEnabled(scat);
+
+    const bool curveIO = showCurveIO_ ? showCurveIO_->getValue() : false;
+    if (curveJSONPaste_) curveJSONPaste_->setEnabled(curveIO);
+    if (curveImport_)    curveImport_->setEnabled(curveIO);
+    if (curveExport_)    curveExport_->setEnabled(curveIO);
 }
 
 }  // namespace dasgrain

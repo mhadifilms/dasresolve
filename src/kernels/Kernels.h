@@ -47,9 +47,19 @@ struct CurveLUT {
 // Expression node.
 inline constexpr float kCurveEpsilon = 0.01f;
 
-// Parameters for the fused grain-apply kernel.
+// Parameters for the fused grain-apply kernel. Keep this struct in sync with
+// the per-backend GPU parameter structs in Metal/CUDA/OpenCL.
 struct GrainApplyParams {
     float    luminance         = 1.0f;   // luminance compensation factor (0..1)
+    float    grainAmount       = 1.0f;   // live gain for the adapted grain
+    float    shadowGrain       = 1.0f;   // live gain in dark Source values
+    float    midtoneGrain      = 1.0f;   // live gain around curvePivot
+    float    highlightGrain    = 1.0f;   // live gain in bright Source values
+    float    curveContrast     = 1.0f;   // strength of tone-gain shaping
+    float    curvePivot        = 0.5f;   // Source luma treated as midtone
+    float    redGrain          = 1.0f;   // per-channel live grain gains
+    float    greenGrain        = 1.0f;
+    float    blueGrain         = 1.0f;
     int32_t  fixGhosting       = 0;      // bool
     int32_t  externalGrain     = 0;      // bool: use ExternalGrain input as the normalised grain
     int32_t  outputMode        = 0;      // OutputMode enum (Params.h)

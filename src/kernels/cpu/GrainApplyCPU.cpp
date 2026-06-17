@@ -19,7 +19,7 @@
 //   g_source  = externalGrain ? ExternalGrain : g_norm
 //   toneGain  = shadow/midtone/highlight shaping at comp luminance
 //   rgbGain   = per-channel user trims
-//   g_adapted = g_source * cComp / eps * toneGain * rgbGain * grainAmount
+//   g_adapted = g_source * cComp / eps * toneGain * rgbGain * grainAmount * 3
 //   m         = mask alpha (or 1)  [optionally inverted]
 //   regrain   = comp + g_adapted * m
 //
@@ -175,6 +175,8 @@ void runGrainApplyCPU(const GrainApplyParams& p,
                 std::max(p.greenGrain, 0.0f),
                 std::max(p.blueGrain, 0.0f),
             };
+            // Matches the original Nuke gizmo's RGB energy when the scalar
+            // response level is applied back to three colour channels.
             const float liveGain = std::max(p.grainAmount, 0.0f) * 3.0f;
             const float g_adapted[3] = {
                 g_source[0] * cC[0] * invEps * tone * channelGain[0] * liveGain,

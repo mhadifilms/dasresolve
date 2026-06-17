@@ -293,9 +293,7 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
                                "(internal) analyse state",
                                "Internal state machine. Don't touch.",
                                analyse_state::kIdle, nullptr, groupAnalyse);
-        p->setIsSecret(true);
         p->setEvaluateOnChange(false);
-        p->setEnabled(false);
     }
 
     defineBool(desc, params::kAnalyseMaskInvert, "invert analysis mask",
@@ -377,9 +375,7 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
                                "(internal) response curve JSON",
                                "Canonical persisted form of the response curve.",
                                "", pageAdjust);
-        p->setIsSecret(true);
         p->setEvaluateOnChange(false);
-        p->setEnabled(false);
     }
 
     auto* groupAdvancedCurve = desc.defineGroupParam("group_advanced_curve");

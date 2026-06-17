@@ -165,7 +165,7 @@ kernel void grainApply(device const float*       comp       [[buffer(0)]],
         sampleCurve(curve, gp.curveSize, 2, gp.minX, gp.maxX, C[2]),
     };
     float tone = toneGain(gp, float3(C[0], C[1], C[2]));
-    float liveGain = max(gp.grainAmount, 0.0f);
+    float liveGain = max(gp.grainAmount, 0.0f) * 3.0f;
     float channelGain[3] = {
         max(gp.redGrain, 0.0f),
         max(gp.greenGrain, 0.0f),

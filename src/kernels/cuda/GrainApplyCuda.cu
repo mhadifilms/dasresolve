@@ -144,7 +144,7 @@ __global__ void grainApplyKernel(const float* __restrict__ comp,
     float cC1 = sampleCurve(curve, gp.curveSize, 1, gp.minX, gp.maxX, C[1]);
     float cC2 = sampleCurve(curve, gp.curveSize, 2, gp.minX, gp.maxX, C[2]);
     float tone = toneGain(gp, C);
-    float liveGain = fmaxf(gp.grainAmount, 0.0f);
+    float liveGain = fmaxf(gp.grainAmount, 0.0f) * 3.0f;
     float channelGain[3] = {
         fmaxf(gp.redGrain, 0.0f),
         fmaxf(gp.greenGrain, 0.0f),

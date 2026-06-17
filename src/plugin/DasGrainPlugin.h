@@ -120,6 +120,12 @@ private:
     OFX::PushButtonParam* curveImport_      = nullptr;
     OFX::PushButtonParam* curveExport_      = nullptr;
     OFX::PushButtonParam* curveHelp_        = nullptr;
+
+    // Resolve/Fusion does not reliably persist hidden String params on OFX
+    // plugins, so keep the most recent analysed/imported curve in instance
+    // memory and use the JSON param only as a persistence fallback.
+    ResponseCurve analysedCurve_;
+    bool hasAnalysedCurve_ = false;
 };
 
 }  // namespace dasgrain

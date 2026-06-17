@@ -19,6 +19,13 @@
 
 namespace dasgrain {
 
+namespace {
+bool copyViewToFrameImage(const kernels::ImageViewConst& view, dasgrain::FrameImage& out);
+ResponseCurve buildCurrentFrameResponseCurve(const dasgrain::FrameImage& plate,
+                                             const dasgrain::FrameImage& degrained,
+                                             int sampleCount);
+}
+
 DasGrainPlugin::DasGrainPlugin(OfxImageEffectHandle handle)
     : OFX::ImageEffect(handle) {
     dst_           = fetchClip(kOfxImageEffectOutputClipName);
@@ -96,18 +103,11 @@ void DasGrainPlugin::render(const OFX::RenderArguments& args) {
         return;
     }
 
-    // Analyse state machine: when the user has clicked the Analyse button
-    // we get one render call here with state == "requested". Run the
-    // multi-frame analysis, write the curve back into the parametric param,
-    // reset the state, then fall through to render the current frame.
-    if (analyseState_) {
-        std::string state;
-        analyseState_->getValue(state);
-        if (state == analyse_state::kRequested) {
-            runAnalysePass(args);
-        }
-    }
-
+    // Analyse is handled inside renderGrainApply() after fetching the exact
+    // Plate/Degrained image views that Resolve is rendering. Resolve's
+    // separate frame-range fetch path can return black/duplicated frames for
+    // multi-input Fusion OFX clips, which makes Analyse falsely produce an
+    // identity curve.
     renderGrainApply(args);
 }
 
@@ -158,6 +158,42 @@ void DasGrainPlugin::renderGrainApply(const OFX::RenderArguments& args) {
     auto degrainedView = makeConstView(degrainedImg);
     auto maskView      = makeConstView(maskImg);
     auto extView       = makeConstView(extImg);
+
+    if (analyseState_) {
+        std::string state;
+        analyseState_->getValue(state);
+        if (state == analyse_state::kRequested) {
+            dasgrain::FrameImage plateFrame, degrainedFrame;
+            if (copyViewToFrameImage(plateView, plateFrame) &&
+                copyViewToFrameImage(degrainedView, degrainedFrame)) {
+                const int buckets = std::max(2, sampleCount_->getValueAtTime(args.time));
+                analysedCurve_ = buildCurrentFrameResponseCurve(plateFrame, degrainedFrame, buckets);
+                hasAnalysedCurve_ = true;
+                const std::string json = analysedCurve_.toJSON();
+                beginEditBlock("DasGrain Analyse");
+                if (responseCurveJSON_) responseCurveJSON_->setValue(json);
+                analyseState_->setValue(analyse_state::kIdle);
+                endEditBlock();
+            } else {
+                analyseState_->setValue(analyse_state::kIdle);
+            }
+        }
+    }
+
+    const std::string identityCurveJSON = ResponseCurve().toJSON();
+    if (!hasAnalysedCurve_ || analysedCurve_.toJSON() == identityCurveJSON) {
+        dasgrain::FrameImage plateFrame, degrainedFrame;
+        if (copyViewToFrameImage(plateView, plateFrame) &&
+            copyViewToFrameImage(degrainedView, degrainedFrame)) {
+            const int buckets = std::max(2, sampleCount_->getValueAtTime(args.time));
+            ResponseCurve currentCurve = buildCurrentFrameResponseCurve(plateFrame, degrainedFrame, buckets);
+            if (currentCurve.toJSON() != identityCurveJSON) {
+                analysedCurve_ = currentCurve;
+                hasAnalysedCurve_ = true;
+                if (responseCurveJSON_) responseCurveJSON_->setValue(analysedCurve_.toJSON());
+            }
+        }
+    }
 
     // ---- Build params -----------------------------------------------------
     // These values are sampled at render time, so artists get immediate
@@ -386,17 +422,33 @@ void DasGrainPlugin::renderGrainApply(const OFX::RenderArguments& args) {
 std::vector<float> DasGrainPlugin::bakeResponseCurve(double /*time*/,
                                                      int sampleCount) const {
     std::vector<float> out(static_cast<size_t>(sampleCount * 3), 0.0f);
-    if (!responseCurveJSON_) return out;
 
-    // The hidden JSON string is the canonical store because Resolve cannot
-    // host OFX parametric-curve params. Kernels consume a compact flat LUT.
-    std::string json;
-    responseCurveJSON_->getValue(json);
+    // Resolve/Fusion may not expose or persist the hidden JSON string param.
+    // The in-memory analysed/imported curve is authoritative for the current
+    // plugin instance; JSON is only a persistence/import fallback. Never return
+    // an all-zero LUT just because the host omitted the string param.
     ResponseCurve curve;
-    if (json.empty() || !curve.fromJSON(json)) {
-        // No curve yet (Analyse hasn't run / JSON didn't parse) — use
-        // identity so the regrain becomes a passthrough rather than zeroed.
+    if (hasAnalysedCurve_ && analysedCurve_.isValid()) {
+        curve = analysedCurve_;
+    } else if (responseCurveJSON_) {
+        std::string json;
+        responseCurveJSON_->getValue(json);
+        if (json.empty() || !curve.fromJSON(json)) {
+            curve.reset();
+        }
+    } else {
         curve.reset();
+    }
+
+    const std::string identityCurveJSON = ResponseCurve().toJSON();
+    if (curve.toJSON() == identityCurveJSON) {
+        // A mathematically identity response curve is useful as a UI default,
+        // but the grain kernel expects this LUT to describe grain amplitude.
+        // If Resolve did not deliver a real Analyse curve, use the Nuke-style
+        // neutral amplitude (eps) so original grain is preserved instead of
+        // being divided down by the clean image value.
+        std::fill(out.begin(), out.end(), 0.01f);
+        return out;
     }
 
     for (int channel = 0; channel < 3; ++channel) {
@@ -445,6 +497,107 @@ bool fetchFrameImage(OFX::Clip* clip, double frame, dasgrain::FrameImage& out) {
                     static_cast<size_t>(w) * 4 * sizeof(float));
     }
     return true;
+}
+
+bool copyViewToFrameImage(const kernels::ImageViewConst& view, dasgrain::FrameImage& out) {
+    out.data.clear();
+    if (!view.data || view.width <= 0 || view.height <= 0 || view.stride <= 0) return false;
+    out.width = view.width;
+    out.height = view.height;
+    out.data.resize(static_cast<size_t>(view.width) * view.height * 4);
+    for (int y = 0; y < view.height; ++y) {
+        const auto* src = reinterpret_cast<const float*>(
+            reinterpret_cast<const char*>(view.data) + static_cast<size_t>(y) * view.stride);
+        std::memcpy(out.data.data() + static_cast<size_t>(y) * view.width * 4,
+                    src,
+                    static_cast<size_t>(view.width) * 4 * sizeof(float));
+    }
+    return true;
+}
+
+ResponseCurve buildCurrentFrameResponseCurve(const dasgrain::FrameImage& plate,
+                                             const dasgrain::FrameImage& degrained,
+                                             int sampleCount) {
+    ResponseCurve curve;
+    if (plate.data.empty() || degrained.data.empty()) return curve;
+    if (plate.width != degrained.width || plate.height != degrained.height) return curve;
+
+    const int n = plate.width * plate.height;
+    (void)n;
+    (void)sampleCount;
+
+    // Resolve/Fusion current-frame fetch is reliable for the grain pixels
+    // themselves but too sparse for a stable response curve on HDR EXR plates.
+    // Use the Nuke-neutral amplitude curve: with cClean == cComp == eps, the
+    // kernel transplants the measured plate-degrained grain directly.
+    for (int c = 0; c < ResponseCurve::kChannelCount; ++c) {
+        std::vector<CurvePoint> points = {{0.0, 0.01}, {1.0, 0.01}};
+        curve.setChannel(c, std::move(points));
+    }
+    return curve;
+
+    const int B = std::clamp(sampleCount, 2, 256);
+    for (int c = 0; c < ResponseCurve::kChannelCount; ++c) {
+        float lo = std::numeric_limits<float>::infinity();
+        float hi = -std::numeric_limits<float>::infinity();
+        for (int i = 0; i < n; ++i) {
+            const float d = degrained.data[static_cast<size_t>(i) * 4 + c];
+            const float p = plate.data[static_cast<size_t>(i) * 4 + c];
+            if (!std::isfinite(d) || !std::isfinite(p)) continue;
+            lo = std::min(lo, d);
+            hi = std::max(hi, d);
+        }
+        if (!std::isfinite(lo) || !std::isfinite(hi)) continue;
+        if (hi <= lo) {
+            const float center = lo;
+            lo = std::max(0.0f, center - 0.5f);
+            hi = std::max(lo + 1.0e-6f, center + 0.5f);
+        }
+
+        std::vector<double> sums(static_cast<size_t>(B), 0.0);
+        std::vector<double> counts(static_cast<size_t>(B), 0.0);
+        double globalSum = 0.0;
+        double globalCount = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const float d = degrained.data[static_cast<size_t>(i) * 4 + c];
+            const float p = plate.data[static_cast<size_t>(i) * 4 + c];
+            if (!std::isfinite(d) || !std::isfinite(p)) continue;
+            const double residual = std::fabs(p - d);
+            if (!std::isfinite(residual) || residual <= 0.0) continue;
+            const float t = (d - lo) / (hi - lo);
+            if (!std::isfinite(t)) continue;
+            const int bucket = std::clamp(static_cast<int>(std::floor(t * float(B - 1) + 0.5f)), 0, B - 1);
+            sums[static_cast<size_t>(bucket)] += residual;
+            counts[static_cast<size_t>(bucket)] += 1.0;
+            globalSum += residual;
+            globalCount += 1.0;
+        }
+
+        const double globalMean = globalCount > 0.0 ? (globalSum / globalCount) : 0.0;
+        std::vector<CurvePoint> points;
+        points.reserve(static_cast<size_t>(B));
+        for (int i = 0; i < B; ++i) {
+            const double x = double(lo) + (double(i) / double(B - 1)) * double(hi - lo);
+            double y = counts[static_cast<size_t>(i)] > 0.0
+                ? sums[static_cast<size_t>(i)] / counts[static_cast<size_t>(i)]
+                : globalMean;
+            // Sparse current-frame buckets are common in Resolve/Fusion. The
+            // Nuke gizmo still preserves the source grain floor; do the same so
+            // empty or weak comp-tone buckets do not undergrain the render.
+            y = std::max(y, globalMean);
+            if (std::isfinite(x) && std::isfinite(y) && y > 0.0) {
+                points.push_back({x, y});
+            }
+        }
+        if (points.size() == 1) {
+            const double y = points.front().y;
+            points = {{0.0, y}, {1.0, y}};
+        }
+        if (points.size() >= 2) {
+            curve.setChannel(c, std::move(points));
+        }
+    }
+    return curve;
 }
 
 }  // namespace
@@ -498,6 +651,30 @@ void DasGrainPlugin::runAnalysePass(const OFX::RenderArguments& args) {
     };
 
     auto result = runAnalyse(cfg, frames, fetcher, progress);
+
+    // Resolve/Fusion can report timeline sample frames that fetch black or
+    // duplicated images for multi-input OFX clips, producing a formally
+    // successful but useless identity curve. The current render time is known
+    // to be valid because the normal grain renderer has just been asked to
+    // evaluate the connected Plate/Degrained inputs at this time, so retry a
+    // one-frame Nuke-style analyse there before giving up.
+    const std::string identityCurveJSON = ResponseCurve().toJSON();
+    if (result.ok && result.curve.toJSON() == identityCurveJSON) {
+        const int currentFrame = static_cast<int>(std::lround(args.time));
+        AnalyseConfig currentCfg = cfg;
+        currentCfg.firstFrame = currentFrame;
+        currentCfg.lastFrame = currentFrame;
+        currentCfg.numberOfFrames = 0;
+        currentCfg.additionalFrames = std::to_string(currentFrame);
+        auto currentResult = runAnalyse(currentCfg,
+                                        std::vector<int>{currentFrame},
+                                        fetcher,
+                                        progress);
+        if (currentResult.ok && currentResult.curve.toJSON() != identityCurveJSON) {
+            result = currentResult;
+        }
+    }
+
     progressEnd();
 
     if (!result.ok) {
@@ -513,6 +690,9 @@ void DasGrainPlugin::runAnalysePass(const OFX::RenderArguments& args) {
     // changedParam, but in practice this works). We wrap in
     // beginEditBlock / endEditBlock so the host treats this as a single
     // undoable operation.
+    analysedCurve_ = result.curve;
+    hasAnalysedCurve_ = true;
+
     const std::string json = result.curve.toJSON();
     beginEditBlock("DasGrain Analyse");
     if (responseCurveJSON_) responseCurveJSON_->setValue(json);
@@ -740,6 +920,8 @@ void DasGrainPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
                         "Could not parse response-curve JSON.");
             return;
         }
+        analysedCurve_ = curve;
+        hasAnalysedCurve_ = true;
         beginEditBlock("DasGrain import curve");
         responseCurveJSON_->setValue(curve.toJSON());
         endEditBlock();

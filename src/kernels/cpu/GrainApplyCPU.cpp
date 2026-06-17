@@ -175,7 +175,7 @@ void runGrainApplyCPU(const GrainApplyParams& p,
                 std::max(p.greenGrain, 0.0f),
                 std::max(p.blueGrain, 0.0f),
             };
-            const float liveGain = std::max(p.grainAmount, 0.0f);
+            const float liveGain = std::max(p.grainAmount, 0.0f) * 3.0f;
             const float g_adapted[3] = {
                 g_source[0] * cC[0] * invEps * tone * channelGain[0] * liveGain,
                 g_source[1] * cC[1] * invEps * tone * channelGain[1] * liveGain,

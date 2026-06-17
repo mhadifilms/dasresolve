@@ -153,7 +153,7 @@ __kernel void grainApply(__global const float* comp,
     };
     float tone = toneGain(shadowGrain, midtoneGrain, highlightGrain,
                           curveContrast, curvePivot, C[0], C[1], C[2]);
-    float liveGain = fmax(grainAmount, 0.0f);
+    float liveGain = fmax(grainAmount, 0.0f) * 3.0f;
     float channelGain[3] = {
         fmax(redGrain, 0.0f),
         fmax(greenGrain, 0.0f),

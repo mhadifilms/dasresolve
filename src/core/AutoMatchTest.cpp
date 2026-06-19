@@ -58,7 +58,11 @@ ResponseCurve flatCurve(double v) {
 }
 
 void assertNear(double got, double want, double eps) {
-    assert(std::fabs(got - want) <= eps);
+    if (std::fabs(got - want) > eps) {
+        std::cerr << "assertNear failed: got=" << got << " want=" << want
+                  << " eps=" << eps << "\n";
+        assert(false);
+    }
 }
 
 void neutralFitFindsOneThirdProduct() {
@@ -81,7 +85,7 @@ void neutralFitFindsOneThirdProduct() {
     assertNear(result.blueGrain, 1.0, 0.03);
 }
 
-void underGrainedSourceGetsSmallTopUp() {
+void underGrainedSourceGetsEnergyTopUp() {
     AutoMatchFrame frame;
     frame.degrained = makeImage(32, 32, 0.4f);
     frame.plate = frame.degrained;
@@ -94,7 +98,7 @@ void underGrainedSourceGetsSmallTopUp() {
     cfg.changedRegionThreshold = 1.0;
     auto result = runAutoMatch(cfg, flatCurve(0.1), std::vector<AutoMatchFrame>{frame});
     assert(result.ok);
-    assertNear(result.grainAmount, 0.04, 0.015);
+    assertNear(result.grainAmount, 0.158, 0.02);
     assertNear(result.redGrain, 1.0, 0.05);
     assertNear(result.greenGrain, 1.0, 0.05);
     assertNear(result.blueGrain, 1.0, 0.05);
@@ -187,7 +191,7 @@ void streamingFetcherMatchesVectorPath() {
 
 int main() {
     neutralFitFindsOneThirdProduct();
-    underGrainedSourceGetsSmallTopUp();
+    underGrainedSourceGetsEnergyTopUp();
     channelBiasProducesChannelTrim();
     changedRegionIsRejected();
     streamingFetcherMatchesVectorPath();

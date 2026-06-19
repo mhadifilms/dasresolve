@@ -70,6 +70,9 @@ private:
     // beginEditBlock/endEditBlock and resets the state.
     void runAnalysePass(const OFX::RenderArguments& args);
 
+    // Optional calibration pass that writes only the existing gain knobs.
+    void runAutoMatchPass(const OFX::RenderArguments& args);
+
     // Clips ----------------------------------------------------------------
     OFX::Clip* dst_           = nullptr;
     OFX::Clip* source_        = nullptr;     // COMP
@@ -88,6 +91,8 @@ private:
     OFX::IntParam*        sampleCount_      = nullptr;
     OFX::PushButtonParam* analyse_          = nullptr;
     OFX::StringParam*     analyseState_     = nullptr;
+    OFX::PushButtonParam* autoMatch_        = nullptr;
+    OFX::StringParam*     autoMatchState_   = nullptr;
     OFX::BooleanParam*    analyseMaskInvert_ = nullptr;
     // The on-screen parametric curve widget is intentionally absent: OFX's
     // kOfxParamTypeParametric is host-optional and DaVinci Resolve does

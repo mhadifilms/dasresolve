@@ -10,12 +10,14 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <vector>
 
 #include "ofxsImageEffect.h"
 
 #include "Params.h"
 #include "core/Analyser.h"
+#include "core/AutoMatch.h"
 #include "core/ResponseCurve.h"
 #include "kernels/KernelDispatch.h"
 #include "kernels/Kernels.h"
@@ -50,6 +52,8 @@ DasGrainPlugin::DasGrainPlugin(OfxImageEffectHandle handle)
     sampleCount_       = fetchIntParam(params::kSampleCount);
     analyse_           = fetchPushButtonParam(params::kAnalyse);
     analyseState_      = fetchStringParam(params::kAnalyseState);
+    autoMatch_         = fetchPushButtonParam(params::kAutoMatch);
+    autoMatchState_    = fetchStringParam(params::kAutoMatchState);
     analyseMaskInvert_ = fetchBooleanParam(params::kAnalyseMaskInvert);
     // Resolve doesn't support kOfxParamTypeParametric, so we don't fetch
     // the on-screen curve widget any more — see DasGrainFactory.cpp and
@@ -107,6 +111,14 @@ void DasGrainPlugin::render(const OFX::RenderArguments& args) {
     if (!haveAll) {
         renderPassThrough(args);
         return;
+    }
+
+    if (autoMatchState_) {
+        std::string state;
+        autoMatchState_->getValue(state);
+        if (state == analyse_state::kRequested) {
+            runAutoMatchPass(args);
+        }
     }
 
     // Analyse is handled inside renderGrainApply() after fetching the exact
@@ -626,6 +638,99 @@ void DasGrainPlugin::runAnalysePass(const OFX::RenderArguments& args) {
     endEditBlock();
 }
 
+void DasGrainPlugin::runAutoMatchPass(const OFX::RenderArguments& args) {
+    if (!source_ || !plate_ || !degrained_) return;
+    if (autoMatchState_) autoMatchState_->setValue(analyse_state::kRunning);
+
+    ResponseCurve curve;
+    if (hasAnalysedCurve_ && analysedCurve_.isValid()) {
+        curve = analysedCurve_;
+    } else if (responseCurveJSON_) {
+        std::string json;
+        responseCurveJSON_->getValue(json);
+        if (!json.empty() && curve.fromJSON(json)) {
+            analysedCurve_ = curve;
+            hasAnalysedCurve_ = true;
+        }
+    }
+    if (!curve.isValid()) {
+        sendMessage(OFX::Message::eMessageError, "dasgrain_auto_match",
+                    "Auto Match needs an analysed response curve. Run Analyse first.");
+        if (autoMatchState_) autoMatchState_->setValue(analyse_state::kIdle);
+        return;
+    }
+
+    AnalyseConfig frameCfg;
+    frameCfg.sampleCount = sampleCount_ ? sampleCount_->getValueAtTime(args.time) : defaults::kSampleCount;
+    frameCfg.numberOfFrames = numberOfFrames_
+        ? numberOfFrames_->getValueAtTime(args.time)
+        : defaults::kNumberOfFrames;
+    if (additionalFrames_) additionalFrames_->getValue(frameCfg.additionalFrames);
+    double t1 = 0.0, t2 = 0.0;
+    timeLineGetBounds(t1, t2);
+    frameCfg.firstFrame = static_cast<int>(std::lround(t1));
+    frameCfg.lastFrame = static_cast<int>(std::lround(t2));
+    auto sampleFrames = computeSampleFrames(frameCfg);
+    if (sampleFrames.empty()) {
+        sendMessage(OFX::Message::eMessageError, "dasgrain_auto_match",
+                    "No Auto Match frames. Set 'number of frames' > 0 or add explicit frames.");
+        if (autoMatchState_) autoMatchState_->setValue(analyse_state::kIdle);
+        return;
+    }
+
+    AutoMatchConfig cfg;
+    cfg.luminance = luminance_ ? luminance_->getValueAtTime(args.time) : defaults::kLuminance;
+    cfg.shadowGrain = shadowGrain_ ? shadowGrain_->getValueAtTime(args.time) : defaults::kToneGrain;
+    cfg.midtoneGrain = midtoneGrain_ ? midtoneGrain_->getValueAtTime(args.time) : defaults::kToneGrain;
+    cfg.highlightGrain = highlightGrain_ ? highlightGrain_->getValueAtTime(args.time) : defaults::kToneGrain;
+    cfg.curveContrast = curveContrast_ ? curveContrast_->getValueAtTime(args.time) : defaults::kCurveContrast;
+    cfg.curvePivot = curvePivot_ ? curvePivot_->getValueAtTime(args.time) : defaults::kCurvePivot;
+    cfg.useMask = mask_ && mask_->isConnected();
+    cfg.invertMask = analyseMaskInvert_ ? analyseMaskInvert_->getValueAtTime(args.time) : false;
+
+    progressStart("DasGrain Auto Match", "dasgrain_auto_match");
+    auto progress = [&](double t) {
+        return progressUpdate(t);
+    };
+
+    auto fetcher = [&](AutoMatchClipKind kind, int frame, FrameImage& out) -> bool {
+        OFX::Clip* clip = nullptr;
+        switch (kind) {
+            case AutoMatchClipKind::kSource:    clip = source_;    break;
+            case AutoMatchClipKind::kPlate:     clip = plate_;     break;
+            case AutoMatchClipKind::kDegrained: clip = degrained_; break;
+            case AutoMatchClipKind::kMask:      clip = mask_;      break;
+        }
+        return fetchFrameImage(clip, double(frame), out);
+    };
+
+    const AutoMatchResult result = runAutoMatch(cfg, curve, sampleFrames, fetcher, progress);
+    progressEnd();
+
+    if (!result.ok) {
+        sendMessage(OFX::Message::eMessageError, "dasgrain_auto_match",
+                    std::string("Auto Match failed: ") + result.error);
+        if (autoMatchState_) autoMatchState_->setValue(analyse_state::kIdle);
+        return;
+    }
+
+    beginEditBlock("DasGrain Auto Match");
+    if (grainAmount_) grainAmount_->setValue(result.grainAmount);
+    if (redGrain_) redGrain_->setValue(result.redGrain);
+    if (greenGrain_) greenGrain_->setValue(result.greenGrain);
+    if (blueGrain_) blueGrain_->setValue(result.blueGrain);
+    if (autoMatchState_) autoMatchState_->setValue(analyse_state::kIdle);
+    endEditBlock();
+
+    std::ostringstream msg;
+    msg << "Auto Match: grain " << result.grainAmount
+        << ", RGB " << result.redGrain
+        << " / " << result.greenGrain
+        << " / " << result.blueGrain
+        << ", sampled " << result.framesSampled << " frame(s).";
+    sendMessage(OFX::Message::eMessageMessage, "dasgrain_auto_match", msg.str());
+}
+
 void DasGrainPlugin::renderPassThrough(const OFX::RenderArguments& args) {
     std::unique_ptr<OFX::Image> dst(dst_->fetchImage(args.time));
     if (!dst) return;
@@ -687,6 +792,10 @@ void DasGrainPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
         if (analyseState_) analyseState_->setValue(analyse_state::kRequested);
         return;
     }
+    if (name == params::kAutoMatch) {
+        if (autoMatchState_) autoMatchState_->setValue(analyse_state::kRequested);
+        return;
+    }
     if (name == params::kCurveHelp) {
         sendMessage(OFX::Message::eMessageMessage, "dasgrain_curve_help",
                     "DasGrain analyses Plate - Degrained, normalises that "
@@ -694,6 +803,10 @@ void DasGrainPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
                     "luminance. In Resolve, use grain amount plus shadow / "
                     "midtone / highlight grain for the normal artist-facing "
                     "curve work.\n\n"
+                    "Auto Match is an optional assistant that measures the "
+                    "regrained result against the plate and writes grain amount "
+                    "plus RGB trims, matching the manual per-channel tuning "
+                    "workflow without changing the analysed curve.\n\n"
                     "Curve pivot chooses where midtones sit. Curve contrast "
                     "controls how strongly those tone knobs bend the response. "
                     "RGB grain trims are for small color-channel bias fixes.\n\n"
@@ -891,12 +1004,42 @@ void DasGrainPlugin::changedClip(const OFX::InstanceChangedArgs& /*args*/,
 void DasGrainPlugin::getFramesNeeded(const OFX::FramesNeededArguments& args,
                                      OFX::FramesNeededSetter& frames) {
     OfxRangeD here{args.time, args.time};
-    if (source_)        frames.setFramesNeeded(*source_,        here);
-    if (mask_)          frames.setFramesNeeded(*mask_,          here);
     if (externalGrain_) frames.setFramesNeeded(*externalGrain_, here);
 
+    OfxRangeD sourceRange = here;
+    OfxRangeD maskRange   = here;
     OfxRangeD plateRange = here;
     OfxRangeD degRange   = here;
+
+    if (autoMatchState_) {
+        std::string state;
+        autoMatchState_->getValue(state);
+        if (state == analyse_state::kRequested) {
+            AnalyseConfig cfg;
+            cfg.sampleCount = sampleCount_ ? sampleCount_->getValue() : defaults::kSampleCount;
+            cfg.numberOfFrames = numberOfFrames_
+                ? numberOfFrames_->getValue()
+                : defaults::kNumberOfFrames;
+            if (additionalFrames_) additionalFrames_->getValue(cfg.additionalFrames);
+            double t1 = 0.0, t2 = 0.0;
+            timeLineGetBounds(t1, t2);
+            cfg.firstFrame = static_cast<int>(std::lround(t1));
+            cfg.lastFrame = static_cast<int>(std::lround(t2));
+            auto sampleFrames = computeSampleFrames(cfg);
+            if (!sampleFrames.empty()) {
+                auto minmax = std::minmax_element(sampleFrames.begin(), sampleFrames.end());
+                OfxRangeD autoRange{double(*minmax.first), double(*minmax.second)};
+                sourceRange.min = std::min(sourceRange.min, autoRange.min);
+                sourceRange.max = std::max(sourceRange.max, autoRange.max);
+                maskRange.min = std::min(maskRange.min, autoRange.min);
+                maskRange.max = std::max(maskRange.max, autoRange.max);
+                plateRange.min = std::min(plateRange.min, autoRange.min);
+                plateRange.max = std::max(plateRange.max, autoRange.max);
+                degRange.min = std::min(degRange.min, autoRange.min);
+                degRange.max = std::max(degRange.max, autoRange.max);
+            }
+        }
+    }
 
     // Scatter needs plate/deg at sample_frame as well (FrameHold equivalent).
     if (scatter_ && scatter_->getValue()) {
@@ -908,6 +1051,8 @@ void DasGrainPlugin::getFramesNeeded(const OFX::FramesNeededArguments& args,
         degRange.max   = std::max(degRange.max,   scatterRange.max);
     }
 
+    if (source_)    frames.setFramesNeeded(*source_,    sourceRange);
+    if (mask_)      frames.setFramesNeeded(*mask_,      maskRange);
     if (plate_)     frames.setFramesNeeded(*plate_,     plateRange);
     if (degrained_) frames.setFramesNeeded(*degrained_, degRange);
 }

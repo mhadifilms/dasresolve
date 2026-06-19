@@ -121,6 +121,7 @@ set(DASGRAIN_CORE_SOURCES
     src/core/FrameRange.cpp
     src/core/ResponseCurve.cpp
     src/core/Analyser.cpp
+    src/core/AutoMatch.cpp
     src/core/Voronoi.cpp)
 
 set(DASGRAIN_PLUGIN_SOURCES
@@ -256,6 +257,20 @@ endif()
 
 if(MSVC)
     target_compile_definitions(${DASGRAIN_TARGET} PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+endif()
+
+# ---------------------------------------------------------------------------
+# Core tests
+# ---------------------------------------------------------------------------
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(DasGrainCoreTests
+        src/core/AutoMatchTest.cpp
+        ${DASGRAIN_CORE_SOURCES})
+    target_include_directories(DasGrainCoreTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_features(DasGrainCoreTests PRIVATE cxx_std_17)
+    add_test(NAME DasGrainCoreTests COMMAND DasGrainCoreTests)
 endif()
 
 # ---------------------------------------------------------------------------

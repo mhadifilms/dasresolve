@@ -289,9 +289,27 @@ void DasGrainFactory::describeInContext(OFX::ImageEffectDescriptor& desc,
     }
 
     {
+        auto* p = desc.definePushButtonParam(params::kAutoMatch);
+        p->setLabels("Auto Match", "Auto Match", "Auto Match");
+        p->setScriptName(params::kAutoMatch);
+        p->setHint("After Analyse, tune grain amount and RGB trims by measuring "
+                   "the regrained result against the original plate.");
+        p->setParent(*groupAnalyse);
+        pageAnalyse->addChild(*p);
+    }
+
+    {
         auto* p = defineString(desc, params::kAnalyseState,
                                "(internal) analyse state",
                                "Internal state machine. Don't touch.",
+                               analyse_state::kIdle, nullptr, groupAnalyse);
+        p->setEvaluateOnChange(false);
+    }
+
+    {
+        auto* p = defineString(desc, params::kAutoMatchState,
+                               "(internal) auto match state",
+                               "Internal Auto Match state machine. Don't touch.",
                                analyse_state::kIdle, nullptr, groupAnalyse);
         p->setEvaluateOnChange(false);
     }

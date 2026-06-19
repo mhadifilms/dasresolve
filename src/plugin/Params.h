@@ -49,6 +49,8 @@ constexpr const char* kSampleCount      = "sample_count";
 constexpr const char* kAnalyse          = "analyse";            // PushButton
 constexpr const char* kAnalyseState     = "analyse_state";      // hidden String
 constexpr const char* kAnalyseMaskInvert = "analyse_mask_invert";
+constexpr const char* kAutoMatch        = "auto_match";         // PushButton
+constexpr const char* kAutoMatchState   = "auto_match_state";   // hidden String
 
 // Adjust tab.
 constexpr const char* kResponseCurve     = "response_curve";    // legacy id (unused; see kResponseCurveJSON)

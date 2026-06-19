@@ -55,6 +55,9 @@ struct AutoMatchResult {
     std::string error;
 
     double grainAmount = 1.0;
+    double shadowGrain = 1.0;
+    double midtoneGrain = 1.0;
+    double highlightGrain = 1.0;
     double redGrain = 1.0;
     double greenGrain = 1.0;
     double blueGrain = 1.0;
@@ -62,6 +65,7 @@ struct AutoMatchResult {
     std::array<double, 3> channelProducts{{1.0, 1.0, 1.0}};
     std::array<double, 3> targetEnergy{{0.0, 0.0, 0.0}};
     std::array<double, 3> fittedEnergy{{0.0, 0.0, 0.0}};
+    double energyCoverageBoost = 1.0;
 
     std::uint64_t pixelsSampled = 0;
     int framesSampled = 0;

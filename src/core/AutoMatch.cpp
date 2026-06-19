@@ -33,6 +33,14 @@ double median3(double a, double b, double c) {
     return values[1];
 }
 
+double distributeBoost(double& value, double boost, double maxValue) {
+    if (boost <= 1.0 || value >= maxValue) return boost;
+    const double room = maxValue / std::max(value, kEps);
+    const double applied = std::min(boost, room);
+    value *= applied;
+    return boost / applied;
+}
+
 bool sameFormat(const FrameImage& a, const FrameImage& b) {
     return !a.data.empty() && !b.data.empty()
         && a.width == b.width
@@ -280,6 +288,21 @@ AutoMatchResult finishResult(const AutoMatchConfig& cfg, const Accumulator& accu
         result.fittedEnergy[c] = std::abs(products[c])
             * std::sqrt(accum.denominator[c] / double(result.pixelsSampled));
     }
+
+    const double coverageBoost = median3(
+        result.targetEnergy[0] / std::max(result.fittedEnergy[0], kEps),
+        result.targetEnergy[1] / std::max(result.fittedEnergy[1], kEps),
+        result.targetEnergy[2] / std::max(result.fittedEnergy[2], kEps));
+    result.energyCoverageBoost = clampDouble(coverageBoost, 1.0, cfg.maxGain * cfg.maxChannelGain);
+    double remaining = result.energyCoverageBoost;
+    remaining = distributeBoost(result.grainAmount, remaining, cfg.maxGain);
+    const double toneBoost = clampDouble(
+        std::sqrt(std::max(remaining, 1.0)),
+        cfg.minGain,
+        cfg.maxGain);
+    result.shadowGrain = toneBoost;
+    result.midtoneGrain = toneBoost;
+    result.highlightGrain = toneBoost;
 
     result.ok = true;
     return result;

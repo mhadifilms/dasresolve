@@ -716,6 +716,9 @@ void DasGrainPlugin::runAutoMatchPass(const OFX::RenderArguments& args) {
 
     beginEditBlock("DasGrain Auto Match");
     if (grainAmount_) grainAmount_->setValue(result.grainAmount);
+    if (shadowGrain_) shadowGrain_->setValue(result.shadowGrain);
+    if (midtoneGrain_) midtoneGrain_->setValue(result.midtoneGrain);
+    if (highlightGrain_) highlightGrain_->setValue(result.highlightGrain);
     if (redGrain_) redGrain_->setValue(result.redGrain);
     if (greenGrain_) greenGrain_->setValue(result.greenGrain);
     if (blueGrain_) blueGrain_->setValue(result.blueGrain);
@@ -724,9 +727,13 @@ void DasGrainPlugin::runAutoMatchPass(const OFX::RenderArguments& args) {
 
     std::ostringstream msg;
     msg << "Auto Match: grain " << result.grainAmount
+        << ", tone " << result.shadowGrain
+        << " / " << result.midtoneGrain
+        << " / " << result.highlightGrain
         << ", RGB " << result.redGrain
         << " / " << result.greenGrain
         << " / " << result.blueGrain
+        << ", energy boost " << result.energyCoverageBoost
         << ", sampled " << result.framesSampled << " frame(s).";
     sendMessage(OFX::Message::eMessageMessage, "dasgrain_auto_match", msg.str());
 }
@@ -805,8 +812,8 @@ void DasGrainPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
                     "curve work.\n\n"
                     "Auto Match is an optional assistant that measures the "
                     "regrained result against the plate and writes grain amount "
-                    "plus RGB trims, matching the manual per-channel tuning "
-                    "workflow without changing the analysed curve.\n\n"
+                    "plus tone and RGB trims, matching the manual grain-energy "
+                    "tuning workflow without changing the analysed curve.\n\n"
                     "Curve pivot chooses where midtones sit. Curve contrast "
                     "controls how strongly those tone knobs bend the response. "
                     "RGB grain trims are for small color-channel bias fixes.\n\n"

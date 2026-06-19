@@ -9,6 +9,7 @@
 #include "core/AutoMatch.h"
 
 using dasgrain::AutoMatchConfig;
+using dasgrain::AutoMatchClipKind;
 using dasgrain::AutoMatchFrame;
 using dasgrain::ResponseCurve;
 
@@ -140,6 +141,48 @@ void changedRegionIsRejected() {
     assert(result.pixelsSampled < static_cast<std::uint64_t>((64 - 2) * (64 - 2)));
 }
 
+void streamingFetcherMatchesVectorPath() {
+    AutoMatchFrame frameA;
+    frameA.degrained = makeImage(32, 32, 0.35f);
+    frameA.plate = frameA.degrained;
+    frameA.source = frameA.degrained;
+    addNoise(frameA.plate, 1.0f, 1.2f, 0.8f);
+    addNoise(frameA.source, 0.8f, 0.9f, 0.7f);
+
+    AutoMatchFrame frameB;
+    frameB.degrained = makeImage(32, 32, 0.55f);
+    frameB.plate = frameB.degrained;
+    frameB.source = frameB.degrained;
+    addNoise(frameB.plate, 1.1f, 1.1f, 0.9f);
+    addNoise(frameB.source, 0.9f, 0.85f, 0.75f);
+
+    const std::vector<AutoMatchFrame> frames{frameA, frameB};
+    AutoMatchConfig cfg;
+    cfg.luminance = 0.0;
+    cfg.changedRegionThreshold = 1.0;
+    const ResponseCurve curve = flatCurve(0.1);
+    const auto vectorResult = runAutoMatch(cfg, curve, frames);
+
+    const auto fetcher = [&](AutoMatchClipKind kind, int frame, dasgrain::FrameImage& out) {
+        const AutoMatchFrame& src = frames.at(static_cast<size_t>(frame));
+        switch (kind) {
+            case AutoMatchClipKind::kSource: out = src.source; return true;
+            case AutoMatchClipKind::kPlate: out = src.plate; return true;
+            case AutoMatchClipKind::kDegrained: out = src.degrained; return true;
+            case AutoMatchClipKind::kMask: out = src.mask; return true;
+        }
+        return false;
+    };
+    const auto streamResult = runAutoMatch(cfg, curve, std::vector<int>{0, 1}, fetcher);
+
+    assert(vectorResult.ok);
+    assert(streamResult.ok);
+    assertNear(streamResult.grainAmount, vectorResult.grainAmount, 1e-12);
+    assertNear(streamResult.redGrain, vectorResult.redGrain, 1e-12);
+    assertNear(streamResult.greenGrain, vectorResult.greenGrain, 1e-12);
+    assertNear(streamResult.blueGrain, vectorResult.blueGrain, 1e-12);
+}
+
 }  // namespace
 
 int main() {
@@ -147,6 +190,7 @@ int main() {
     underGrainedSourceGetsSmallTopUp();
     channelBiasProducesChannelTrim();
     changedRegionIsRejected();
+    streamingFetcherMatchesVectorPath();
     std::cout << "auto_match_test: ok\n";
     return 0;
 }

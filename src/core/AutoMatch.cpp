@@ -15,9 +15,9 @@ namespace {
 constexpr double kEps = 1e-6;
 
 struct Accumulator {
+    std::array<double, 3> numerator{{0.0, 0.0, 0.0}};
     std::array<double, 3> denominator{{0.0, 0.0, 0.0}};
     std::array<double, 3> targetSq{{0.0, 0.0, 0.0}};
-    std::array<double, 3> sourceSq{{0.0, 0.0, 0.0}};
     std::uint64_t pixelsSampled = 0;
     int framesSampled = 0;
 };
@@ -224,13 +224,10 @@ bool accumulateFrame(const AutoMatchConfig& cfg,
                 if (!std::isfinite(target) || !std::isfinite(source) || !std::isfinite(base)) {
                     continue;
                 }
-                // Grain matching is an energy problem, not a pixel-correlation
-                // problem: the source may already contain uncorrelated grain.
-                // Fit the missing energy needed to bring source variance up to
-                // the original plate.
+                const double wanted = target - source;
+                accum.numerator[c] += base * wanted;
                 accum.denominator[c] += base * base;
-                accum.targetSq[c] += target * target;
-                accum.sourceSq[c] += source * source;
+                accum.targetSq[c] += wanted * wanted;
             }
             accum.pixelsSampled += 1;
         }
@@ -254,9 +251,8 @@ AutoMatchResult finishResult(const AutoMatchConfig& cfg, const Accumulator& accu
             result.error = "generated grain energy is zero";
             return result;
         }
-        const double missingSq = std::max(accum.targetSq[c] - accum.sourceSq[c], 0.0);
         result.channelProducts[c] = clampDouble(
-            std::sqrt(missingSq / accum.denominator[c]),
+            accum.numerator[c] / accum.denominator[c],
             cfg.minGain,
             cfg.maxGain);
         result.targetEnergy[c] = std::sqrt(accum.targetSq[c] / double(result.pixelsSampled));
@@ -281,10 +277,8 @@ AutoMatchResult finishResult(const AutoMatchConfig& cfg, const Accumulator& accu
         result.grainAmount * result.blueGrain,
     };
     for (int c = 0; c < 3; ++c) {
-        const double sourceEnergySq = accum.sourceSq[c] / double(result.pixelsSampled);
-        const double addedEnergySq = products[c] * products[c]
-            * accum.denominator[c] / double(result.pixelsSampled);
-        result.fittedEnergy[c] = std::sqrt(sourceEnergySq + addedEnergySq);
+        result.fittedEnergy[c] = std::abs(products[c])
+            * std::sqrt(accum.denominator[c] / double(result.pixelsSampled));
     }
 
     result.ok = true;
